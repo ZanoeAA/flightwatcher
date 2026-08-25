@@ -1,9 +1,13 @@
-name: Daily Flight Price Check
+name: Flight Price Check (every 10 days)
 
 on:
   schedule:
-    - cron: "0 7 * * *"
-  workflow_dispatch: {}
+    # Runs at 07:00 UTC every 10th day. GitHub Actions cron doesn't support
+    # "every N days" natively, so this uses a day-of-month pattern that
+    # lands roughly every 10 days. You can also just trigger it manually
+    # via "Run workflow" below whenever you want to check.
+    - cron: "0 7 1,11,21 * *"
+  workflow_dispatch: {}   # lets you trigger it manually from the Actions tab too
 
 jobs:
   check-prices:
@@ -22,8 +26,7 @@ jobs:
 
       - name: Run price check
         env:
-          AMADEUS_CLIENT_ID: ${{ secrets.AMADEUS_CLIENT_ID }}
-          AMADEUS_CLIENT_SECRET: ${{ secrets.AMADEUS_CLIENT_SECRET }}
+          FLIGHTAPI_KEY: ${{ secrets.FLIGHTAPI_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
