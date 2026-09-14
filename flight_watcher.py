@@ -19,8 +19,10 @@ IMPORTANT — free tier credits are limited (~20-30 total, 2 credits/check).
 This script is designed to run every 10 days, NOT daily, to stay within
 the free quota. Set up your scheduler (see README.md) accordingly.
 
-Alerts you by email if it finds a valid alternative cheaper than what you
-paid. Automatically stops once STOP_DATE has passed.
+Sends you a short summary email EVERY run — either a "found a cheaper
+option!" alert, or a "checked today, nothing beats your price yet" note —
+so you always get confirmation it ran, without needing to check GitHub.
+Automatically stops once STOP_DATE has passed.
 
 All secrets are read from environment variables — never hard-code them:
     FLIGHTAPI_KEY
@@ -222,12 +224,27 @@ def main() -> None:
     offers = parse_offers(data)
 
     if not offers:
-        print("No qualifying offers (El Al nonstop, or Israeli-airline one-stop) found today.")
+        # Still send a summary email so you know the check ran, even
+        # though no qualifying itinerary was found at all today.
+        subject = "✈️ Flight check ran — no qualifying offers found today"
+        body = (
+            f"Checked TLV -> {DESTINATION} for {OUTBOUND_DATE} to {RETURN_DATE}, "
+            f"{ADULTS} adults, {TRAVEL_CLASS}.\n\n"
+            f"No itineraries matched the Israeli-airline rule today "
+            f"(nonstop must be El Al; one-stop must involve an Israeli airline "
+            f"on the Israel-touching leg).\n\n"
+            f"This can happen if FlightAPI's data source had a gap for this route/date "
+            f"on this particular check. Next automatic check is in ~10 days, or you can "
+            f"trigger one manually from GitHub Actions any time.\n"
+        )
+        send_email_alert(subject, body)
+        print("No qualifying offers found today. Summary email sent.")
         log_results([])
         return
 
     log_results(offers)
 
+    cheapest_seen = min(offers, key=lambda o: o["price"])
     cheaper_offers = [o for o in offers if o["price"] < AMOUNT_PAID_USD]
 
     if cheaper_offers:
@@ -250,10 +267,22 @@ def main() -> None:
         send_email_alert(subject, body)
         print(f"ALERT SENT: qualifying fare found at {best['price']:.2f} {best['currency']}")
     else:
-        cheapest_seen = min(offers, key=lambda o: o["price"])
-        print(f"No cheaper qualifying fare today. Cheapest seen: "
-              f"{cheapest_seen['price']:.2f} {cheapest_seen['currency']} — "
-              f"out: {cheapest_seen['outbound_summary']} / back: {cheapest_seen['return_summary']}")
+        # No cheaper deal, but still send a short confirmation email
+        # so you know the check ran and what the current cheapest is.
+        subject = f"✈️ Flight check ran — cheapest today: ${cheapest_seen['price']:.0f} (no better than yours)"
+        body = (
+            f"Checked TLV -> {DESTINATION} for {OUTBOUND_DATE} to {RETURN_DATE}, "
+            f"{ADULTS} adults, {TRAVEL_CLASS}.\n\n"
+            f"Cheapest qualifying option seen today: {cheapest_seen['price']:.2f} {cheapest_seen['currency']}\n"
+            f"You paid: {AMOUNT_PAID_USD:.2f} {CURRENCY}\n\n"
+            f"Outbound: {cheapest_seen['outbound_summary']}\n"
+            f"Return:   {cheapest_seen['return_summary']}\n\n"
+            f"Nothing beat your price today. Next automatic check is in ~10 days, "
+            f"or you can trigger one manually from GitHub Actions any time.\n"
+        )
+        send_email_alert(subject, body)
+        print(f"No cheaper qualifying fare today. Summary email sent. "
+              f"Cheapest seen: {cheapest_seen['price']:.2f} {cheapest_seen['currency']}")
 
 
 if __name__ == "__main__":
