@@ -3,10 +3,14 @@
 Flight Price Watcher — TLV to San Francisco (SFO)
 =====================================================
 Goal: reach SFO from TLV, where every alternative must be either:
-  (a) NONSTOP on El Al, or
-  (b) ONE-STOP where the Israel-touching leg (TLV departure on the way out,
-      TLV arrival on the way back) is on an Israeli airline
-      (El Al, Arkia, or Israir).
+  (a) NONSTOP on El Al (Premium Economy), or
+  (b) ONE-STOP via a hub (e.g. Europe) where the Israel-touching leg
+      (TLV departure on the way out, TLV arrival on the way back) is on
+      an Israeli airline (El Al, Arkia, or Israir). For one-stop trips,
+      Economy is fine on the TLV<->hub leg, but the hub<->SFO leg should
+      be Premium Economy — the API can't confirm per-leg cabin class, so
+      this must be verified manually when a one-stop result is flagged
+      (see NOTE below).
 
 This mirrors your actual booking: TLV -> LAX on El Al, then a free
 United-miles hop LAX -> SFO. We're watching for a genuinely better way to
@@ -14,6 +18,13 @@ reach SFO directly under the same "Israeli airline touching Israel" rule.
 
 Uses FlightAPI.io (https://www.flightapi.io) since Amadeus's free
 self-service portal was decommissioned in July 2026.
+
+NOTE ON CABIN CLASS: FlightAPI's search takes ONE cabin class for the
+whole itinerary and doesn't expose per-segment cabin class in results.
+So this script searches in Premium Economy (matching the mandatory class
+for the SFO-bound leg) but cannot verify that a one-stop itinerary's
+first leg is Economy vs Premium Economy. Any one-stop result should be
+manually checked on the airline/OTA site before booking.
 
 IMPORTANT — free tier credits are limited (~20-30 total, 2 credits/check).
 This script is designed to run every 10 days, NOT daily, to stay within
@@ -68,6 +79,14 @@ STOP_DATE = date(2026, 12, 1)   # Dec 4 minus 3 days, computed for clarity/safet
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "price_log.csv")
 
+CABIN_VERIFY_NOTE = (
+    "IMPORTANT — cabin class check needed: for one-stop itineraries, "
+    "Economy is fine on the TLV<->hub leg, but the hub<->SFO leg should "
+    "be Premium Economy. This system searches in Premium Economy but "
+    "can't confirm the cabin class of each individual leg — please "
+    "verify this manually on the airline/OTA site before booking."
+)
+
 # ─────────────────────────────────────────────────────────────────────────
 # 2. FLIGHTAPI.IO HELPERS
 # ─────────────────────────────────────────────────────────────────────────
@@ -111,7 +130,7 @@ def leg_is_valid(leg: dict, carrier_lookup: dict, is_return: bool) -> bool:
     carrier list, since FlightAPI's leg-level data doesn't always expose
     per-segment carrier order clearly — if ANY Israeli airline appears in
     the leg's marketing carriers for a one-stop itinerary, we treat it as
-    a match and let you verify exact routing manually via the email link.
+    a match and let you verify exact routing manually via the email note.
     """
     stop_count = leg.get("stop_count", 99)
     carrier_ids = leg.get("marketing_carrier_ids", [])
@@ -155,11 +174,15 @@ def parse_offers(data: dict) -> list[dict]:
                 stops = leg.get("stop_count", "?")
                 return f"{'+'.join(sorted(codes))} ({stops} stop{'s' if stops != 1 else ''})"
 
+            outbound_is_one_stop = outbound_leg.get("stop_count", 0) == 1
+            return_is_one_stop = return_leg.get("stop_count", 0) == 1
+
             parsed.append({
                 "price": price,
                 "currency": CURRENCY,
                 "outbound_summary": leg_summary(outbound_leg),
                 "return_summary": leg_summary(return_leg),
+                "has_one_stop_leg": outbound_is_one_stop or return_is_one_stop,
             })
         except (KeyError, ValueError, TypeError, IndexError):
             continue  # skip malformed entries rather than crash the whole run
@@ -175,7 +198,8 @@ def log_results(offers: list[dict]) -> None:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow([
-                "checked_at", "outbound", "return", "price", "currency", "cheaper_than_paid",
+                "checked_at", "outbound", "return", "price", "currency",
+                "cheaper_than_paid", "has_one_stop_leg",
             ])
         for o in offers:
             cheaper = o["price"] < AMOUNT_PAID_USD
@@ -186,6 +210,7 @@ def log_results(offers: list[dict]) -> None:
                 o["price"],
                 o["currency"],
                 cheaper,
+                o["has_one_stop_leg"],
             ])
 
 
@@ -224,8 +249,6 @@ def main() -> None:
     offers = parse_offers(data)
 
     if not offers:
-        # Still send a summary email so you know the check ran, even
-        # though no qualifying itinerary was found at all today.
         subject = "✈️ Flight check ran — no qualifying offers found today"
         body = (
             f"Checked TLV -> {DESTINATION} for {OUTBOUND_DATE} to {RETURN_DATE}, "
@@ -261,14 +284,17 @@ def main() -> None:
             f"Outbound date: {OUTBOUND_DATE}   Return date: {RETURN_DATE}\n"
             f"Cabin: {TRAVEL_CLASS}   Adults: {ADULTS}\n\n"
             f"Rule applied: nonstop must be El Al; one-stop must involve an Israeli airline "
-            f"on the Israel-touching leg. Please verify the exact routing and fare rules before "
-            f"booking, and check any change/cancellation fees on your current ticket.\n"
+            f"on the Israel-touching leg.\n"
+        )
+        if best["has_one_stop_leg"]:
+            body += f"\n{CABIN_VERIFY_NOTE}\n"
+        body += (
+            f"\nPlease verify the exact routing and fare rules before booking, "
+            f"and check any change/cancellation fees on your current ticket.\n"
         )
         send_email_alert(subject, body)
         print(f"ALERT SENT: qualifying fare found at {best['price']:.2f} {best['currency']}")
     else:
-        # No cheaper deal, but still send a short confirmation email
-        # so you know the check ran and what the current cheapest is.
         subject = f"✈️ Flight check ran — cheapest today: ${cheapest_seen['price']:.0f} (no better than yours)"
         body = (
             f"Checked TLV -> {DESTINATION} for {OUTBOUND_DATE} to {RETURN_DATE}, "
@@ -277,6 +303,10 @@ def main() -> None:
             f"You paid: {AMOUNT_PAID_USD:.2f} {CURRENCY}\n\n"
             f"Outbound: {cheapest_seen['outbound_summary']}\n"
             f"Return:   {cheapest_seen['return_summary']}\n\n"
+        )
+        if cheapest_seen["has_one_stop_leg"]:
+            body += f"{CABIN_VERIFY_NOTE}\n\n"
+        body += (
             f"Nothing beat your price today. Next automatic check is in ~10 days, "
             f"or you can trigger one manually from GitHub Actions any time.\n"
         )
