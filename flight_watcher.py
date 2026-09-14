@@ -81,10 +81,14 @@ LOG_FILE = os.path.join(os.path.dirname(__file__), "price_log.csv")
 
 CABIN_VERIFY_NOTE = (
     "IMPORTANT — cabin class check needed: for one-stop itineraries, "
-    "Economy is fine on the TLV<->hub leg, but the hub<->SFO leg should "
-    "be Premium Economy. This system searches in Premium Economy but "
-    "can't confirm the cabin class of each individual leg — please "
-    "verify this manually on the airline/OTA site before booking."
+    "whichever segment FIRST lands on US soil should be Premium Economy "
+    "(whether that's your final destination or just a connection point, "
+    "e.g. TLV->LAX on El Al before a LAX->SFO domestic hop). Any leg "
+    "AFTER that first US landing can be Economy or Premium Economy — "
+    "it doesn't need to match. This system can't tell from the flight "
+    "data which stop is in the US vs. elsewhere (e.g. Europe), so please "
+    "verify the actual routing and cabin class per leg manually on the "
+    "airline/OTA site before booking."
 )
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -316,4 +320,3 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
