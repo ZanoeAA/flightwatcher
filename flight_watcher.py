@@ -250,6 +250,7 @@ def main() -> None:
           f"{OUTBOUND_DATE} to {RETURN_DATE}, {ADULTS} adults, {TRAVEL_CLASS}...")
 
     data = search_round_trip()
+    raw_itinerary_count = len(data.get("itineraries", []))
     offers = parse_offers(data)
 
     if not offers:
@@ -257,15 +258,30 @@ def main() -> None:
         body = (
             f"Checked TLV -> {DESTINATION} for {OUTBOUND_DATE} to {RETURN_DATE}, "
             f"{ADULTS} adults, {TRAVEL_CLASS}.\n\n"
-            f"No itineraries matched the Israeli-airline rule today "
+            f"FlightAPI returned {raw_itinerary_count} itinerary/itineraries in total, "
+            f"but none matched the Israeli-airline rule today "
             f"(nonstop must be El Al; one-stop must involve an Israeli airline "
             f"on the Israel-touching leg).\n\n"
-            f"This can happen if FlightAPI's data source had a gap for this route/date "
-            f"on this particular check. Next automatic check is in ~10 days, or you can "
-            f"trigger one manually from GitHub Actions any time.\n"
+        )
+        if raw_itinerary_count == 0:
+            body += (
+                f"Since FlightAPI returned ZERO itineraries at all for this route/date, "
+                f"this looks like a genuine data gap on their end for this search — "
+                f"not a filtering issue on our side.\n\n"
+            )
+        else:
+            body += (
+                f"Since {raw_itinerary_count} itinerary/itineraries WERE returned but none "
+                f"qualified, this suggests real flights exist for this route/date, but none "
+                f"currently satisfy the Israeli-airline rule (e.g. connections via non-Israeli "
+                f"carriers only, or El Al not showing Premium Economy availability right now).\n\n"
+            )
+        body += (
+            f"Next automatic check is in ~10 days, or you can trigger one manually from "
+            f"GitHub Actions any time.\n"
         )
         send_email_alert(subject, body)
-        print("No qualifying offers found today. Summary email sent.")
+        print(f"No qualifying offers found today ({raw_itinerary_count} raw itineraries seen). Summary email sent.")
         log_results([])
         return
 
@@ -320,4 +336,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-      main()
+    main()
